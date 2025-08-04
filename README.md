@@ -20,7 +20,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
   "KlitnyjS/nvim-jira-branch",
   config = function()
-    require("jira_branch").setup({
+    require("jira-branch").setup({
       branches = {
         'development',
         'master',
