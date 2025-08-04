@@ -7,7 +7,7 @@ local config = {
 --- JIRA INTEGRATION
 
 local function is_jira_configured()
-    if vim.fn.executable("jira") == 0 then
+    if vim.fn.executable 'jira' == 0 then
         vim.notify('Jira CLI not found in PATH. Some features may not work.', vim.log.levels.WARN)
         return false
     end

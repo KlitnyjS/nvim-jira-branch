@@ -10,6 +10,7 @@ Create git branches from Jira tickets in Neovim.
 ## Requirements
 
 - [Jira CLI](https://github.com/ankitpokhrel/jira-cli)
+- [tpope/vim-fugitive](https://github.com/tpope/vim-fugitive)
 - `git`
 
 ## Installation
@@ -19,6 +20,9 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "KlitnyjS/nvim-jira-branch",
+  dependencies = {
+      'tpope/vim-fugitive',
+  },
   config = function()
     require("jira-branch").setup({
       branches = {
