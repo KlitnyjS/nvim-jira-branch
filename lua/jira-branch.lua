@@ -1,20 +1,24 @@
 local M = {}
 
 local config = {
-    branches = { 'development', 'master', 'pre-production' }
+    branches = { 'development', 'master', 'pre-production' },
 }
 
 --- JIRA INTEGRATION
 
 local function is_jira_configured()
-    local handle = io.popen('jira me 2>&1')
+    if vim.fn.executable("jira") == 0 then
+        vim.notify('Jira CLI not found in PATH. Some features may not work.', vim.log.levels.WARN)
+        return false
+    end
+    local handle = io.popen 'jira me 2>&1'
     if not handle then
         vim.notify('Unable to check Jira configuration', vim.log.levels.ERROR)
         return false
     end
-    local result = handle:read('*a')
+    local result = handle:read '*a'
     handle:close()
-    if result:match('You are not logged in') or result:match('No configuration found') or result:match('401') then
+    if result:match 'You are not logged in' or result:match 'No configuration found' or result:match '401' then
         vim.notify('Jira CLI is not configured or you are not logged in.', vim.log.levels.ERROR)
         return false
     end
@@ -47,6 +51,11 @@ local function fetch_ticket_title(ticket)
 end
 
 function M.create_branch_from_jira_ticket()
+    if vim.fn.exists ':Git' ~= 2 then
+        vim.notify('Fugitive.vim is not installed. Please install it to use this plugin.', vim.log.levels.ERROR)
+        return
+    end
+
     local ticket = vim.fn.input 'Enter Jira Ticket ID: '
     if ticket == '' then
         vim.notify('No Jira ticket provided', vim.log.levels.WARN)
@@ -93,5 +102,3 @@ function M.setup(user_config)
 end
 
 return M
-
-
