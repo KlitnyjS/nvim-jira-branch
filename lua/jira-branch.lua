@@ -16,16 +16,13 @@ end
 
 -- Helper: Show a modal notification
 local function notify_popup(msg, hl, timeout)
-    local level = vim.log.levels.INFO
-    if hl == 'ErrorMsg' then
-        level = vim.log.levels.ERROR
-    elseif hl == 'WarningMsg' then
-        level = vim.log.levels.WARN
-    elseif hl == 'Question' then
-        level = vim.log.levels.INFO
-    elseif hl == 'MoreMsg' then
-        level = vim.log.levels.INFO
-    end
+    local hl_to_level = {
+        ErrorMsg = vim.log.levels.ERROR,
+        WarningMsg = vim.log.levels.WARN,
+        Question = vim.log.levels.INFO,
+        MoreMsg = vim.log.levels.INFO,
+    }
+    local level = hl_to_level[hl] or vim.log.levels.INFO
     vim.notify(msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
 end
 
@@ -147,4 +144,3 @@ function M.setup(user_config)
 end
 
 return M
-
