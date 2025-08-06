@@ -4,22 +4,68 @@ local config = {
     branches = { 'development', 'master', 'pre-production' },
 }
 
---- JIRA INTEGRATION
+-- Helper: Show a modal input popup
+local function input_popup(opts, on_confirm)
+    vim.ui.input({
+        prompt = opts.prompt or 'Input: ',
+        default = opts.default or '',
+    }, function(input)
+        on_confirm(input)
+    end)
+end
 
+-- Helper: Show a modal notification
+local function notify_popup(msg, hl, timeout)
+    local level = vim.log.levels.INFO
+    if hl == 'ErrorMsg' then
+        level = vim.log.levels.ERROR
+    elseif hl == 'WarningMsg' then
+        level = vim.log.levels.WARN
+    elseif hl == 'Question' then
+        level = vim.log.levels.INFO
+    elseif hl == 'MoreMsg' then
+        level = vim.log.levels.INFO
+    end
+    vim.notify(msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
+end
+
+-- Helper: Show a modal selection popup using native vim.ui.select
+local function select_popup(title, items, on_choice)
+    vim.ui.select(items, {
+        prompt = title,
+        format_item = function(item)
+            return item
+        end,
+    }, function(choice)
+        if not choice then
+            on_choice(nil)
+        else
+            for i, v in ipairs(items) do
+                if v == choice then
+                    on_choice(i)
+                    return
+                end
+            end
+            on_choice(nil)
+        end
+    end)
+end
+
+--- JIRA INTEGRATION
 local function is_jira_configured()
     if vim.fn.executable 'jira' == 0 then
-        vim.notify('Jira CLI not found in PATH. Some features may not work.', vim.log.levels.WARN)
+        notify_popup('Jira CLI not found in PATH. Some features may not work.', 'WarningMsg')
         return false
     end
     local handle = io.popen 'jira me 2>&1'
     if not handle then
-        vim.notify('Unable to check Jira configuration', vim.log.levels.ERROR)
+        notify_popup('Unable to check Jira configuration', 'ErrorMsg')
         return false
     end
     local result = handle:read '*a'
     handle:close()
     if result:match 'You are not logged in' or result:match 'No configuration found' or result:match '401' then
-        vim.notify('Jira CLI is not configured or you are not logged in.', vim.log.levels.ERROR)
+        notify_popup('Jira CLI is not configured or you are not logged in.', 'ErrorMsg')
         return false
     end
     return true
@@ -37,7 +83,7 @@ local function fetch_ticket_title(ticket)
         local command = string.format(command_template, start_at, max_results, ticket)
         local handle = io.popen(command)
         if not handle then
-            vim.notify('Error getting Jira ticket', vim.log.levels.ERROR)
+            notify_popup('Error getting Jira ticket', 'ErrorMsg')
             return ''
         end
         local result = handle:read '*a'
@@ -52,47 +98,46 @@ end
 
 function M.create_branch_from_jira_ticket()
     if vim.fn.exists ':Git' ~= 2 then
-        vim.notify('Fugitive.vim is not installed. Please install it to use this plugin.', vim.log.levels.ERROR)
+        notify_popup('Fugitive.vim is not installed. Please install it to use this plugin.', 'ErrorMsg')
         return
     end
 
-    local ticket = vim.fn.input 'Enter Jira Ticket ID: '
-    if ticket == '' then
-        vim.notify('No Jira ticket provided', vim.log.levels.WARN)
-        return
-    end
+    input_popup({ prompt = 'Enter Jira Ticket ID: ' }, function(ticket)
+        if not ticket or ticket == '' then
+            notify_popup('No Jira ticket provided', 'WarningMsg')
+            return
+        end
 
-    local title = fetch_ticket_title(ticket)
-    local ok, branch_name = pcall(vim.fn.input, 'Proposed branch name: ', title)
-    if not ok or branch_name == '' then
-        vim.notify('Branch creation canceled', vim.log.levels.INFO)
-        return
-    end
+        local title = fetch_ticket_title(ticket)
+        input_popup({ prompt = 'Proposed branch name: ', width = 60, default = title }, function(branch_name)
+            if not branch_name or branch_name == '' then
+                notify_popup('Branch creation canceled', 'MoreMsg')
+                return
+            end
 
-    local choices = config.branches or { 'development', 'master', 'pre-production' }
+            local choices = config.branches or { 'development', 'master', 'pre-production' }
 
-    local input = { 'Select base branch:' }
-    for i, branch in ipairs(choices) do
-        table.insert(input, string.format('%d. %s', i, branch))
-    end
-    local choice = vim.fn.inputlist(input)
+            select_popup('Select base branch:', choices, function(choice)
+                local base_branch = choices[choice]
+                if not base_branch then
+                    notify_popup('Invalid choice. Please select a valid branch.', 'ErrorMsg')
+                    return
+                end
 
-    local base_branch = choices[choice]
-    if not base_branch then
-        vim.notify('Invalid choice. Please select a valid branch.', vim.log.levels.ERROR)
-        return
-    end
-
-    -- Check if the branch already exists
-    local branch_exists = vim.fn.system('git branch --list ' .. branch_name)
-    if branch_exists ~= '' then
-        vim.notify('Branch already exists. Switching to the existing branch.', vim.log.levels.INFO)
-        vim.cmd('silent! Git checkout ' .. branch_name)
-    else
-        vim.cmd('Git checkout ' .. base_branch)
-        vim.cmd('Git checkout -b ' .. branch_name)
-        vim.cmd('Git push --set-upstream origin ' .. branch_name)
-    end
+                -- Check if the branch already exists
+                local branch_exists = vim.fn.system('git branch --list ' .. branch_name)
+                if branch_exists ~= '' then
+                    notify_popup('Branch already exists. Switching to the existing branch.', 'MoreMsg')
+                    vim.cmd('silent! Git checkout ' .. branch_name)
+                else
+                    vim.cmd('Git checkout ' .. base_branch)
+                    vim.cmd('Git checkout -b ' .. branch_name)
+                    vim.cmd('Git push --set-upstream origin ' .. branch_name)
+                    notify_popup('Branch created and pushed: ' .. branch_name, 'Question')
+                end
+            end)
+        end)
+    end)
 end
 
 function M.setup(user_config)
@@ -102,3 +147,4 @@ function M.setup(user_config)
 end
 
 return M
+
