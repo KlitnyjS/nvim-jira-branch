@@ -21,7 +21,7 @@ local function notify_popup(msg, hl, timeout)
         MoreMsg = vim.log.levels.INFO,
     }
     local level = hl_to_level[hl] or vim.log.levels.INFO
-    vim.notify(msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
+    vim.notify('\n' .. msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
 end
 
 local function select_popup(title, items, on_choice)
@@ -66,7 +66,7 @@ end
 
 local function fetch_ticket_title(ticket)
     if not is_jira_configured() then
-        return ''
+        return ticket
     end
     local start_at = 0
     local max_results = 100
@@ -77,7 +77,7 @@ local function fetch_ticket_title(ticket)
         local handle = io.popen(command)
         if not handle then
             notify_popup('Error getting Jira ticket', 'ErrorMsg')
-            return ''
+            return ticket
         end
         local result = handle:read '*a'
         handle:close()
@@ -86,7 +86,7 @@ local function fetch_ticket_title(ticket)
         end
         start_at = start_at + max_results
     end
-    return ''
+    return ticket
 end
 
 function M.create_branch_from_jira_ticket()
