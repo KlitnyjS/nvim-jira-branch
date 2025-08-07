@@ -4,7 +4,6 @@ local config = {
     branches = { 'development', 'master', 'pre-production' },
 }
 
--- Helper: Show a modal input popup
 local function input_popup(opts, on_confirm)
     vim.ui.input({
         prompt = opts.prompt or 'Input: ',
@@ -14,7 +13,6 @@ local function input_popup(opts, on_confirm)
     end)
 end
 
--- Helper: Show a modal notification
 local function notify_popup(msg, hl, timeout)
     local hl_to_level = {
         ErrorMsg = vim.log.levels.ERROR,
@@ -26,7 +24,6 @@ local function notify_popup(msg, hl, timeout)
     vim.notify(msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
 end
 
--- Helper: Show a modal selection popup using native vim.ui.select
 local function select_popup(title, items, on_choice)
     vim.ui.select(items, {
         prompt = title,
@@ -48,7 +45,6 @@ local function select_popup(title, items, on_choice)
     end)
 end
 
---- JIRA INTEGRATION
 local function is_jira_configured()
     if vim.fn.executable 'jira' == 0 then
         notify_popup('Jira CLI not found in PATH. Some features may not work.', 'WarningMsg')
@@ -86,7 +82,7 @@ local function fetch_ticket_title(ticket)
         local result = handle:read '*a'
         handle:close()
         if result and result ~= '' then
-            return result:gsub('%s+$', '') -- trim trailing whitespace
+            return result:gsub('%s+$', '')
         end
         start_at = start_at + max_results
     end
@@ -121,7 +117,6 @@ function M.create_branch_from_jira_ticket()
                     return
                 end
 
-                -- Check if the branch already exists
                 local branch_exists = vim.fn.system('git branch --list ' .. branch_name)
                 if branch_exists ~= '' then
                     notify_popup('Branch already exists. Switching to the existing branch.', 'MoreMsg')
