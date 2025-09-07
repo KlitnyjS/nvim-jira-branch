@@ -1,3 +1,4 @@
+-- luacheck: globals vim
 local M = {}
 
 local config = {
@@ -74,18 +75,13 @@ local function fetch_ticket_title(ticket)
         'jira issue list --paginate %d:%d --plain | grep %s | awk -F "\\t" \'{print toupper($2) "-" tolower($3)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\''
     while start_at <= 300 do
         local command = string.format(command_template, start_at, max_results, ticket)
-        local handle = io.popen(command)
-        if not handle then
-            notify_popup('Error getting Jira ticket', 'ErrorMsg')
-            return ticket
-        end
-        local result = handle:read '*a'
-        handle:close()
-        if result and result ~= '' then
+        local result = vim.fn.system(command)
+        if vim.v.shell_error == 0 and result and result ~= '' then
             return result:gsub('%s+$', '')
         end
         start_at = start_at + max_results
     end
+    notify_popup('Error getting Jira ticket', 'ErrorMsg')
     return ticket
 end
 
@@ -94,31 +90,26 @@ function M.create_branch_from_jira_ticket()
         notify_popup('Fugitive.vim is not installed. Please install it to use this plugin.', 'ErrorMsg')
         return
     end
-
     input_popup({ prompt = 'Enter Jira Ticket ID: ' }, function(ticket)
         if not ticket or ticket == '' then
             notify_popup('No Jira ticket provided', 'WarningMsg')
             return
         end
-
         local title = fetch_ticket_title(ticket)
         input_popup({ prompt = 'Proposed branch name: ', width = 60, default = title }, function(branch_name)
             if not branch_name or branch_name == '' then
                 notify_popup('Branch creation canceled', 'MoreMsg')
                 return
             end
-
             local choices = config.branches or { 'development', 'master', 'pre-production' }
-
             select_popup('Select base branch:', choices, function(choice)
                 local base_branch = choices[choice]
                 if not base_branch then
                     notify_popup('Invalid choice. Please select a valid branch.', 'ErrorMsg')
                     return
                 end
-
-                local branch_exists = vim.fn.system('git branch --list ' .. branch_name)
-                if branch_exists ~= '' then
+                vim.fn.system('git rev-parse --verify ' .. branch_name)
+                if vim.v.shell_error == 0 then
                     notify_popup('Branch already exists. Switching to the existing branch.', 'MoreMsg')
                     vim.cmd('silent! Git checkout ' .. branch_name)
                 else
