@@ -3,9 +3,106 @@ local M = {}
 
 local config = {
     branches = { 'development', 'master', 'pre-production' },
+    -- When true, use a centered floating window for input instead of vim.ui.input
+    center_input = true,
 }
 
+-- Basic floating centered single-line input implementation
+-- Falls back to vim.ui.input when center_input = false
+local function floating_input(opts, on_confirm)
+    local prompt = opts.prompt or 'Input: '
+    local default = opts.default or ''
+
+    -- Determine size
+    local min_width = 40
+    local width = math.max(min_width, #prompt + #default + 10)
+    if width > vim.o.columns - 4 then
+        width = vim.o.columns - 4
+    end
+    local height = 3
+
+    local row = math.floor((vim.o.lines - height) / 2 - 1)
+    if row < 1 then row = 1 end
+    local col = math.floor((vim.o.columns - width) / 2)
+    if col < 0 then col = 0 end
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = 'editor',
+        width = width,
+        height = height,
+        row = row,
+        col = col,
+        style = 'minimal',
+        border = 'rounded',
+        title = prompt:sub(1, width - 4),
+        title_pos = 'center',
+    })
+
+    -- Set buffer content: we use second line for the actual input value
+    local lines = { '', default }
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+    -- Some buffer options for a nicer UX
+    vim.api.nvim_set_option_value('buftype', 'prompt', { buf = buf })
+    vim.api.nvim_set_option_value('modifiable', true, { buf = buf })
+    vim.api.nvim_set_option_value('filetype', 'jira_branch_input', { buf = buf })
+
+    -- Position cursor at end of default value
+    vim.api.nvim_win_set_cursor(win, { 2, #default })
+
+    local function cleanup()
+        if win and vim.api.nvim_win_is_valid(win) then
+            pcall(vim.api.nvim_win_close, win, true)
+        end
+        if buf and vim.api.nvim_buf_is_valid(buf) then
+            pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+    end
+
+    local function do_confirm()
+        if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+            cleanup()
+            on_confirm(nil)
+            return
+        end
+        local current = vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] or ''
+        cleanup()
+        if current == '' then
+            on_confirm(nil)
+        else
+            on_confirm(current)
+        end
+    end
+
+    local function do_cancel()
+        cleanup()
+        on_confirm(nil)
+    end
+
+    -- Keymaps for confirm / cancel (normal & insert modes)
+    local keymap_opts = { nowait = true, noremap = true, silent = true, buffer = buf }
+    vim.keymap.set({ 'n', 'i' }, '<CR>', do_confirm, keymap_opts)
+    vim.keymap.set({ 'n', 'i' }, '<Esc>', do_cancel, keymap_opts)
+    vim.keymap.set('n', 'q', do_cancel, keymap_opts)
+
+    -- If user leaves buffer, cancel
+    vim.api.nvim_create_autocmd('BufLeave', {
+        buffer = buf,
+        once = true,
+        callback = function()
+            if vim.api.nvim_get_current_buf() ~= buf then
+                do_cancel()
+            end
+        end,
+    })
+end
+
 local function input_popup(opts, on_confirm)
+    if config.center_input then
+        floating_input(opts, on_confirm)
+        return
+    end
     vim.ui.input({
         prompt = opts.prompt or 'Input: ',
         default = opts.default or '',
