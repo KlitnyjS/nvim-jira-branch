@@ -152,7 +152,19 @@ local function notify_popup(msg, hl, timeout)
         MoreMsg = vim.log.levels.INFO,
     }
     local level = hl_to_level[hl] or vim.log.levels.INFO
-    vim.notify('\n' .. msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
+
+    -- Use vim.schedule to make it non-blocking and avoid Press ENTER prompts
+    vim.schedule(function()
+        vim.notify(msg, level, { title = 'Jira Branch', timeout = timeout or 2000 })
+    end)
+end
+
+-- For transient messages that don't need notifications
+local function echo_message(msg)
+    vim.schedule(function()
+        vim.cmd('redraw')
+        vim.api.nvim_echo({{msg, 'MoreMsg'}}, false, {})
+    end)
 end
 
 local function select_popup(title, items, on_choice)
@@ -178,18 +190,18 @@ end
 
 local function is_jira_configured()
     if vim.fn.executable 'jira' == 0 then
-        notify_popup('Jira CLI not found in PATH. Some features may not work.', 'WarningMsg')
+        notify_popup('Jira CLI not found in PATH', 'WarningMsg')
         return false
     end
     local handle = io.popen 'jira me 2>&1'
     if not handle then
-        notify_popup('Unable to check Jira configuration', 'ErrorMsg')
+        notify_popup('Unable to check Jira config', 'ErrorMsg')
         return false
     end
     local result = handle:read '*a'
     handle:close()
     if result:match 'You are not logged in' or result:match 'No configuration found' or result:match '401' then
-        notify_popup('Jira CLI is not configured or you are not logged in.', 'ErrorMsg')
+        notify_popup('Jira CLI not configured or not logged in', 'ErrorMsg')
         return false
     end
     return true
@@ -206,7 +218,7 @@ local function fetch_ticket_title(ticket)
     local start_at = 0
     local max_results = 100
     local command_template =
-        'jira issue list --paginate %d:%d --plain 2>/dev/null | grep %s | awk -F "\\t" \'{print toupper($2) "-" tolower($3)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\' | head -n 1'
+        'jira issue list --paginate %d:%d --plain 2>/dev/null | grep %s | awk -F "\\t" \'{print toupper($3) "-" tolower($4)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\' | head -n 1'
 
     -- Try up to 4 pages (400 issues max)
     while start_at <= 300 do
@@ -225,13 +237,13 @@ local function fetch_ticket_title(ticket)
     end
 
     -- If we couldn't find the ticket, return the original ticket ID
-    notify_popup('Could not find Jira ticket "' .. ticket .. '". Using ticket ID as branch name.', 'WarningMsg', 3000)
+    notify_popup('Ticket "' .. ticket .. '" not found. Using ID as branch name.', 'WarningMsg', 3000)
     return ticket
 end
 
 function M.create_branch_from_jira_ticket()
     if vim.fn.exists ':Git' ~= 2 then
-        notify_popup('Fugitive.vim is not installed. Please install it to use this plugin.', 'ErrorMsg')
+        notify_popup('Fugitive.vim not installed', 'ErrorMsg')
         return
     end
 
@@ -241,8 +253,8 @@ function M.create_branch_from_jira_ticket()
             return
         end
 
-        -- Show loading message
-        notify_popup('Fetching Jira ticket "' .. ticket .. '"...', 'MoreMsg', 1000)
+        -- Show non-blocking loading message
+        echo_message('Fetching Jira ticket "' .. ticket .. '"...')
 
         -- Wrap potentially blocking operation in pcall
         local ok, title = pcall(fetch_ticket_title, ticket)
@@ -279,13 +291,13 @@ function M.create_branch_from_jira_ticket()
 
                 local success, err = pcall(function()
                     if branch_exists then
-                        notify_popup('Branch already exists. Switching to the existing branch.', 'MoreMsg')
+                        notify_popup('Switching to existing branch', 'MoreMsg')
                         vim.cmd('silent! Git checkout ' .. vim.fn.fnameescape(branch_name))
                     else
                         vim.cmd('Git checkout ' .. vim.fn.fnameescape(base_branch))
                         vim.cmd('Git checkout -b ' .. vim.fn.fnameescape(branch_name))
                         vim.cmd('Git push --set-upstream origin ' .. vim.fn.fnameescape(branch_name))
-                        notify_popup('Branch created and pushed: ' .. branch_name, 'Question')
+                        notify_popup('Branch created: ' .. branch_name, 'Question')
                     end
                 end)
 
