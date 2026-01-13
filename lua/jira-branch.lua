@@ -19,7 +19,7 @@ local function floating_input(opts, on_confirm)
     if width > vim.o.columns - 4 then
         width = vim.o.columns - 4
     end
-    local height = 3
+    local height = 1
 
     local row = math.floor((vim.o.lines - height) / 2 - 1)
     if row < 1 then row = 1 end
@@ -39,19 +39,38 @@ local function floating_input(opts, on_confirm)
         title_pos = 'center',
     })
 
-    -- Set buffer content: we use second line for the actual input value
-    local lines = { '', default }
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    -- Set buffer content with default value
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { default })
 
-    -- Some buffer options for a nicer UX
-    vim.api.nvim_set_option_value('buftype', 'prompt', { buf = buf })
+    -- Buffer options for a scratch buffer
+    vim.api.nvim_set_option_value('buftype', 'nofile', { buf = buf })
+    vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = buf })
     vim.api.nvim_set_option_value('modifiable', true, { buf = buf })
     vim.api.nvim_set_option_value('filetype', 'jira_branch_input', { buf = buf })
+    vim.api.nvim_set_option_value('swapfile', false, { buf = buf })
 
-    -- Position cursor at end of default value
-    vim.api.nvim_win_set_cursor(win, { 2, #default })
+    -- Position cursor at end of default value and start in insert mode
+    vim.schedule(function()
+        if vim.api.nvim_win_is_valid(win) then
+            pcall(vim.api.nvim_win_set_cursor, win, { 1, #default })
+            vim.cmd('startinsert!')
+        end
+    end)
+
+    -- Flag to prevent double execution
+    local already_closed = false
 
     local function cleanup()
+        if already_closed then
+            return
+        end
+        already_closed = true
+
+        -- Stop insert mode if active
+        if vim.fn.mode() == 'i' then
+            vim.cmd('stopinsert')
+        end
+
         if win and vim.api.nvim_win_is_valid(win) then
             pcall(vim.api.nvim_win_close, win, true)
         end
@@ -61,13 +80,20 @@ local function floating_input(opts, on_confirm)
     end
 
     local function do_confirm()
-        if not (buf and vim.api.nvim_buf_is_valid(buf)) then
-            cleanup()
-            on_confirm(nil)
+        if already_closed then
             return
         end
-        local current = vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] or ''
+
+        local current = ''
+        if buf and vim.api.nvim_buf_is_valid(buf) then
+            local ok, lines = pcall(vim.api.nvim_buf_get_lines, buf, 0, 1, false)
+            if ok and lines and lines[1] then
+                current = lines[1]
+            end
+        end
+
         cleanup()
+
         if current == '' then
             on_confirm(nil)
         else
@@ -76,6 +102,9 @@ local function floating_input(opts, on_confirm)
     end
 
     local function do_cancel()
+        if already_closed then
+            return
+        end
         cleanup()
         on_confirm(nil)
     end
@@ -84,16 +113,20 @@ local function floating_input(opts, on_confirm)
     local keymap_opts = { nowait = true, noremap = true, silent = true, buffer = buf }
     vim.keymap.set({ 'n', 'i' }, '<CR>', do_confirm, keymap_opts)
     vim.keymap.set({ 'n', 'i' }, '<Esc>', do_cancel, keymap_opts)
+    vim.keymap.set({ 'i' }, '<C-c>', do_cancel, keymap_opts)
     vim.keymap.set('n', 'q', do_cancel, keymap_opts)
 
-    -- If user leaves buffer, cancel
-    vim.api.nvim_create_autocmd('BufLeave', {
+    -- If user leaves window, cancel
+    vim.api.nvim_create_autocmd({ 'WinLeave', 'BufLeave' }, {
         buffer = buf,
         once = true,
         callback = function()
-            if vim.api.nvim_get_current_buf() ~= buf then
-                do_cancel()
-            end
+            -- Small delay to prevent race conditions
+            vim.schedule(function()
+                if not already_closed and vim.api.nvim_get_current_buf() ~= buf then
+                    do_cancel()
+                end
+            end)
         end,
     })
 end
@@ -166,19 +199,33 @@ local function fetch_ticket_title(ticket)
     if not is_jira_configured() then
         return ticket
     end
+
+    -- Escape ticket ID for shell safety
+    local escaped_ticket = vim.fn.shellescape(ticket)
+
     local start_at = 0
     local max_results = 100
     local command_template =
-        'jira issue list --paginate %d:%d --plain | grep %s | awk -F "\\t" \'{print toupper($2) "-" tolower($3)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\''
+        'jira issue list --paginate %d:%d --plain 2>/dev/null | grep %s | awk -F "\\t" \'{print toupper($2) "-" tolower($3)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\' | head -n 1'
+
+    -- Try up to 4 pages (400 issues max)
     while start_at <= 300 do
-        local command = string.format(command_template, start_at, max_results, ticket)
+        local command = string.format(command_template, start_at, max_results, escaped_ticket)
         local result = vim.fn.system(command)
+
+        -- Check if we got a valid result
         if vim.v.shell_error == 0 and result and result ~= '' then
-            return result:gsub('%s+$', '')
+            local cleaned = result:gsub('%s+$', ''):gsub('^%s+', '')
+            if cleaned ~= '' then
+                return cleaned
+            end
         end
+
         start_at = start_at + max_results
     end
-    notify_popup('Error getting Jira ticket', 'ErrorMsg')
+
+    -- If we couldn't find the ticket, return the original ticket ID
+    notify_popup('Could not find Jira ticket "' .. ticket .. '". Using ticket ID as branch name.', 'WarningMsg', 3000)
     return ticket
 end
 
@@ -187,33 +234,63 @@ function M.create_branch_from_jira_ticket()
         notify_popup('Fugitive.vim is not installed. Please install it to use this plugin.', 'ErrorMsg')
         return
     end
+
     input_popup({ prompt = 'Enter Jira Ticket ID: ' }, function(ticket)
         if not ticket or ticket == '' then
             notify_popup('No Jira ticket provided', 'WarningMsg')
             return
         end
-        local title = fetch_ticket_title(ticket)
+
+        -- Show loading message
+        notify_popup('Fetching Jira ticket "' .. ticket .. '"...', 'MoreMsg', 1000)
+
+        -- Wrap potentially blocking operation in pcall
+        local ok, title = pcall(fetch_ticket_title, ticket)
+        if not ok then
+            notify_popup('Error fetching Jira ticket: ' .. tostring(title), 'ErrorMsg')
+            title = ticket
+        end
+
         input_popup({ prompt = 'Proposed branch name: ', width = 60, default = title }, function(branch_name)
             if not branch_name or branch_name == '' then
                 notify_popup('Branch creation canceled', 'MoreMsg')
                 return
             end
+
             local choices = config.branches or { 'development', 'master', 'pre-production' }
             select_popup('Select base branch:', choices, function(choice)
+                -- Check if choice is valid (not nil and within bounds)
+                if not choice or type(choice) ~= 'number' or choice < 1 or choice > #choices then
+                    notify_popup('Branch creation canceled', 'MoreMsg')
+                    return
+                end
+
                 local base_branch = choices[choice]
-                if not base_branch then
+                if not base_branch or base_branch == '' then
                     notify_popup('Invalid choice. Please select a valid branch.', 'ErrorMsg')
                     return
                 end
-                vim.fn.system('git rev-parse --verify ' .. branch_name)
-                if vim.v.shell_error == 0 then
-                    notify_popup('Branch already exists. Switching to the existing branch.', 'MoreMsg')
-                    vim.cmd('silent! Git checkout ' .. branch_name)
-                else
-                    vim.cmd('Git checkout ' .. base_branch)
-                    vim.cmd('Git checkout -b ' .. branch_name)
-                    vim.cmd('Git push --set-upstream origin ' .. branch_name)
-                    notify_popup('Branch created and pushed: ' .. branch_name, 'Question')
+
+                -- Wrap git operations in pcall for error handling
+                local branch_exists = pcall(function()
+                    vim.fn.system('git rev-parse --verify ' .. vim.fn.shellescape(branch_name))
+                    return vim.v.shell_error == 0
+                end)
+
+                local success, err = pcall(function()
+                    if branch_exists then
+                        notify_popup('Branch already exists. Switching to the existing branch.', 'MoreMsg')
+                        vim.cmd('silent! Git checkout ' .. vim.fn.fnameescape(branch_name))
+                    else
+                        vim.cmd('Git checkout ' .. vim.fn.fnameescape(base_branch))
+                        vim.cmd('Git checkout -b ' .. vim.fn.fnameescape(branch_name))
+                        vim.cmd('Git push --set-upstream origin ' .. vim.fn.fnameescape(branch_name))
+                        notify_popup('Branch created and pushed: ' .. branch_name, 'Question')
+                    end
+                end)
+
+                if not success then
+                    notify_popup('Git operation failed: ' .. tostring(err), 'ErrorMsg')
                 end
             end)
         end)
