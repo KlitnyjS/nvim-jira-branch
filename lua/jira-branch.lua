@@ -300,7 +300,8 @@ function M.propose_branch_creation(default_name)
         select_popup('Select base branch:', choices, function(choice)
             -- Check if choice is valid (not nil and within bounds)
             if not choice or type(choice) ~= 'number' or choice < 1 or choice > #choices then
-                notify_popup('Branch creation canceled', 'MoreMsg')
+                -- If user canceled, go back to the proposed branch name input so they don't lose the title
+                M.propose_branch_creation(branch_name)
                 return
             end
 
@@ -323,6 +324,8 @@ function M.propose_branch_creation(default_name)
 
             if not base_exists then
                 notify_popup('Base branch "' .. base_branch .. '" not found locally or on origin.', 'ErrorMsg')
+                -- If base branch not found, go back to branch name input (allowing them to retry selection)
+                M.propose_branch_creation(branch_name)
                 return
             end
 
