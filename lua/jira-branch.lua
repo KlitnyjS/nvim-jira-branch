@@ -311,20 +311,29 @@ function M.propose_branch_creation(default_name)
             end
 
             -- Wrap git operations in pcall for error handling
-            local branch_exists = pcall(function()
-                vim.fn.system('git rev-parse --verify ' .. vim.fn.shellescape(branch_name))
+            local _, branch_exists = pcall(function()
+                vim.fn.system('git rev-parse --verify ' .. vim.fn.shellescape(branch_name) .. ' 2>/dev/null')
                 return vim.v.shell_error == 0
             end)
 
             local success, err = pcall(function()
                 if branch_exists then
                     notify_popup('Switching to existing branch', 'MoreMsg')
-                    vim.cmd('silent! Git checkout ' .. vim.fn.fnameescape(branch_name))
+                    vim.cmd('Git checkout ' .. vim.fn.fnameescape(branch_name))
                 else
                     vim.cmd('Git checkout ' .. vim.fn.fnameescape(base_branch))
                     vim.cmd('Git checkout -b ' .. vim.fn.fnameescape(branch_name))
-                    vim.cmd('Git push --set-upstream origin ' .. vim.fn.fnameescape(branch_name))
-                    notify_popup('Branch created: ' .. branch_name, 'Question')
+                    
+                    -- Try to push but don't fail the whole process if push fails (e.g. no remote yet)
+                    local push_success = pcall(function()
+                        vim.cmd('Git push --set-upstream origin ' .. vim.fn.fnameescape(branch_name))
+                    end)
+                    
+                    if push_success then
+                        notify_popup('Branch created and pushed: ' .. branch_name, 'Question')
+                    else
+                        notify_popup('Branch created locally: ' .. branch_name .. ' (Push failed)', 'WarningMsg')
+                    end
                 end
             end)
 
