@@ -310,6 +310,22 @@ function M.propose_branch_creation(default_name)
                 return
             end
 
+            -- Check if base_branch exists locally or remotely
+            local _, base_exists = pcall(function()
+                -- Try to find the branch locally or as a remote tracking branch
+                vim.fn.system('git rev-parse --verify ' .. vim.fn.shellescape(base_branch) .. ' 2>/dev/null')
+                if vim.v.shell_error == 0 then return true end
+                
+                -- Also check if origin/<base_branch> exists
+                vim.fn.system('git rev-parse --verify origin/' .. vim.fn.shellescape(base_branch) .. ' 2>/dev/null')
+                return vim.v.shell_error == 0
+            end)
+
+            if not base_exists then
+                notify_popup('Base branch "' .. base_branch .. '" not found locally or on origin.', 'ErrorMsg')
+                return
+            end
+
             -- Wrap git operations in pcall for error handling
             local _, branch_exists = pcall(function()
                 vim.fn.system('git rev-parse --verify ' .. vim.fn.shellescape(branch_name) .. ' 2>/dev/null')
