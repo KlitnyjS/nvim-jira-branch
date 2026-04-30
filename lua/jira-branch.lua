@@ -226,7 +226,7 @@ local function fetch_ticket_title(ticket, callback)
     local start_at = 0
     local max_results = 100
     local command_template =
-        'jira issue list --paginate %d:%d --plain 2>/dev/null | grep %s | awk -F "\\t" \'{print toupper($3) "-" tolower($4)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\' | head -n 1'
+        'jira issue list --paginate %d:%d --plain 2>/dev/null | grep %s | awk -F "\\t" \'{print toupper($2) "-" tolower($3)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\' | head -n 1'
 
     local function try_page(at)
         if at > 300 then
