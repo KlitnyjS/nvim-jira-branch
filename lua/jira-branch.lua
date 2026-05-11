@@ -229,7 +229,7 @@ local function fetch_ticket_title(ticket, callback)
         'jira issue list --paginate %d:%d --plain 2>/dev/null | grep %s | awk -F "\\t" \'{print toupper($2) "-" tolower($3)}\' | tr -cd "[:alnum:]- " | sed \'s/ /-/g\' | sed \'s/--*/-/g\' | head -n 1'
 
     local function try_page(at)
-        if at > 300 then
+        if at > 600 then
             notify_popup('Ticket "' .. ticket .. '" not found. Using ID as branch name.', 'WarningMsg', 3000)
             callback(ticket)
             return
